@@ -165,7 +165,7 @@ int main (int argc, const char *argv[]) {
         spins.push_back(s);
     }
     
-    auto stat_manager = Sz_manager(lat);
+    auto stat_manager = StatsManager<SSFObservable>(lat);
 
     FILE* dbf = fopen("debug.txt", "w");
 
@@ -202,7 +202,7 @@ int main (int argc, const char *argv[]) {
     cout <<std::endl;
     fclose(dbf);
 
-    stat_manager.save_to_hdf5(ssf_path);
+    stat_manager.save(ssf_path);
 
     return 0;
 }

@@ -11,95 +11,107 @@ template <typename T> T convert_rational(const rational::Rational &r) {
     return static_cast<T>(r.num) / r.denom;
 }
 
-// abstract base class implementing the basic interface
-class observable_manager {
-    protected:
-        const Lattice &lat;
+/*
+template<typename Derived> 
+struct Observable {
+    Observable(){};
 
-        uint64_t n_samples = 0;
+    void store(const Lattice& lat) {
+        static_cast<Derived*>(this)->store(lat);
+    }
 
-        hid_t open_hdf5(const std::string &filename);
+    void write_data(hid_t file_id) {
+        static_cast<Derived*>(this)->write_data(file_id);
+    }
 
-        void write_data(hid_t file_id);
-
-    public:
-        observable_manager(const Lattice &_lat) : lat(_lat) { n_samples = 0; }
-
-        void store() { n_samples++; }; // stores the current state of 'lat'
-        void save_to_hdf5(const std::string &filename) {
-            hid_t file_id = open_hdf5(filename);
-            write_data(file_id);
-            H5Fclose(file_id);
-        }
 };
+*/
+
+template <typename T>
+concept ObservableType = requires(const Lattice &lat, T t, hid_t hid) {
+    T{lat}; // requires a constructor T(const Lattice&)
+    { t.store(lat) } -> std::same_as<void>;
+    { t.write_data(hid) } -> std::same_as<void>;
+};
+
+hid_t open_hdf5(const std::string &filename);
+void write_lat_data( hid_t file_id, const Lattice& lat);
+void write_n_samples(hid_t file_id, size_t n_samples);
+
+
+template<ObservableType... Obs>
+class StatsManager : public Obs... {
+public:
+    StatsManager(const Lattice& _lat) : Obs(_lat)..., lat(_lat) {}
+
+    void store() {
+        n_samples++;
+        (Obs::store(lat), ...);  // fold expression
+    }
+
+    void save(const std::string& filename) {
+        hid_t file_id = open_hdf5(filename); 
+        write_lat_data(file_id, lat);
+        write_n_samples(file_id, n_samples);
+        
+        (Obs::write_data(file_id), ...);
+        H5Fclose(file_id);
+    }
+private:
+    const Lattice& lat;
+    uint64_t n_samples = 0;
+};
+
 
 // class responsible for calculating \sum_i \sigma_i e^{iq \cdot r}
-class ssf_manager : public observable_manager {
-        fftw_plan plans[4];
-        // temporary storage
-        fftw_complex *fft_out;
-        double *spin_field[4];
+struct SSFObservable {
+    SSFObservable(const Lattice& lat); 
+    ~SSFObservable();
+    void store(const Lattice& lat);
+    void write_data(hid_t file_id);
 
-        // the accumulator for <Sz(q)Sz(-q)> (note it is real)
-        double *S_q_acc; // indexed by sublattice
+    
+private:
 
-        hsize_t S_q_acc_dims[3];
+    fftw_plan plans[4];
+    // temporary storage
+    fftw_complex *fft_out;
+    double *spin_field[4];
+    // the accumulator for <Sz(q)Sz(-q)> (note it is real)
+    double *S_q_acc; // indexed by sublattice
+    hsize_t S_q_acc_dims[3];
 
-        void store_ssf();
-
-    protected:
-        void write_data(hid_t file_id);
-
-    public:
-        ssf_manager(const Lattice& _lat);
-        ~ssf_manager();
-
-        void store() {
-            observable_manager::store();
-            store_ssf();
-        }
-
-        void save_to_hdf5(const std::string &filename) {
-            hid_t file_id = open_hdf5(filename);
-            observable_manager::write_data(file_id);
-            write_data(file_id);
-            H5Fclose(file_id);
-        }
 };
+
 
 
 // adds on raw <Sz> measurements
-class Sz_manager : public ssf_manager {
-    double *Sz_acc;
-    void store_Sz(){
+struct SzObservable {
+    SzObservable(const Lattice& lat) {
+        Sz_acc = new double[lat.num_primitive * 4];
+        std::memset(Sz_acc, 0, sizeof(double) * lat.num_primitive * 4);
+
+        const auto L = lat.size();
+        Sz_dims[0]= 4;
+        for (int d=0; d<3; d++){
+            Sz_dims[d+1] = static_cast<hsize_t>(L[2]);
+        }
+    }
+    ~SzObservable(){ delete[] Sz_acc; }
+
+    void store(const Lattice& lat){
         for (auto& [J, l] : lat.links){
             auto s = static_cast<Spin*>(l);
             Sz_acc[J] += s->sz;
         }
     }
-
-    protected:
     void write_data(hid_t file_id);
 
-    public:
-    Sz_manager(const Lattice& _lat) : ssf_manager(_lat) {
-        // Sz_acc = new double[lat.num_primitive * 4];
-    }
-    ~Sz_manager(){
-        // delete[] Sz_acc;
-    }
 
-    void store(){
-        ssf_manager::store();
-        // store_Sz();
-    }
+private:
+    double *Sz_acc;
 
-    void save_to_hdf5(const std::string &filename) {
-        hid_t file_id = open_hdf5(filename);
-        ssf_manager::write_data(file_id);
-        // write_data(file_id);
-        H5Fclose(file_id);
-    }
-
+    hsize_t Sz_dims[4]; 
 
 };
+
