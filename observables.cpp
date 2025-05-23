@@ -205,10 +205,11 @@ void Sz_manager::write_data(hid_t file_id) {
     // Save S(q) for each sublattice
     {
         std::string name = "Sz";
-        const hsize_t dims[3] = {static_cast<hsize_t>(L[0]),
-                                 static_cast<hsize_t>(L[1]),
-                                 static_cast<hsize_t>(L[2])};
-        hid_t space = H5Screate_simple(3, dims, nullptr);
+        const hsize_t dims[4] = {4,
+            static_cast<hsize_t>(L[2]),
+            static_cast<hsize_t>(L[1]),
+            static_cast<hsize_t>(L[0])};
+        hid_t space = H5Screate_simple(4, dims, nullptr);
         hid_t dset = H5Dcreate2(file_id, name.c_str(), H5T_NATIVE_DOUBLE, space,
                                                         H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         H5Dwrite(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
