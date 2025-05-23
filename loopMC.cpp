@@ -165,7 +165,7 @@ int main (int argc, const char *argv[]) {
         spins.push_back(s);
     }
     
-    auto ssf_manager = SSF_manager(lat);
+    auto stat_manager = ssf_manager(lat);
 
     FILE* dbf = fopen("debug.txt", "w");
 
@@ -190,7 +190,7 @@ int main (int argc, const char *argv[]) {
         for (size_t i=0; i<settings.sweep_n_loop; i++){
             success_loop += mc_sweep_loop(spins, gen, settings);
         }
-        ssf_manager.store();
+        stat_manager.store();
         
         
         printf("Acceptance rate: Local %.6f Loop %.6f\r",
@@ -202,7 +202,7 @@ int main (int argc, const char *argv[]) {
     cout <<std::endl;
     fclose(dbf);
 
-    ssf_manager.save_to_hdf5(ssf_path);
+    stat_manager.save_to_hdf5(ssf_path);
 
     return 0;
 }

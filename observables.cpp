@@ -1,102 +1,24 @@
 #include "observables.hpp"
 
+/// Base class, geometry storage
 
-SSF_manager::SSF_manager(const Lattice &_lat) : lat(_lat) {
-    auto Lvec = lat.size();
-    assert(Lvec[0] == Lvec[1] && Lvec[1] == Lvec[2]); // otherwise it's too hard
-	auto L = Lvec[0];	
-	
-    fft_out = fftw_alloc_complex(L * L * (L / 2 + 1));
-
-	S_q_acc_dims[0] = L+1;
-	S_q_acc_dims[1] = L/2+1;
-
-    for (int sl = 0; sl < 4; sl++) {
-        spin_field[sl] = fftw_alloc_real(lat.num_primitive);
-        plans[sl] = fftw_plan_dft_r2c_3d(L, L, L, spin_field[sl], fft_out,
-                                         FFTW_ESTIMATE);
-
-        S_q_acc[sl] = new double[S_q_acc_dims[0] * S_q_acc_dims[1]];
-		for (hsize_t i=0; i<S_q_acc_dims[0] * S_q_acc_dims[1]; i++){
-			S_q_acc[sl][i] = 0.;
-		}
-    }
+hid_t observable_manager::open_hdf5(const std::string &filename) {
+    H5Eset_auto(H5E_DEFAULT, (H5E_auto2_t) H5Eprint, stderr);
+    return H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 }
 
-SSF_manager::~SSF_manager() {
-    for (int sl = 0; sl < 4; sl++) {
-        fftw_destroy_plan(plans[sl]);
-        delete[] S_q_acc[sl];
-    }
-}
-
-void SSF_manager::store() { // saves current state of the lattice to	
-    auto L = lat.size()[0];
-    for (auto [idx, l] : lat.links) {
-		// exploits the structure of lat.links' indexing system
-		// TODO this should really be provided by LIL itself, since it uses forbidden internal knowledge
-        auto sl = idx / lat.num_primitive;
-		assert( lat.primitive_spec.sl_of_link(l->position) == sl);
-		auto tmp = idx % lat.num_primitive;
-		int J[3];
-		J[0] = tmp / (L*L);
-		J[1] = (tmp - L*L*J[0]) / L;
-		J[2] = tmp - L*(L*J[0]+J[1]);
-		assert(lat.primitive_spec.lattice_vectors * ipos_t({J[2],J[1],J[0]}) + lat.primitive_spec.link_no(sl).position == l->position);
-
-
-        assert(sl < 4);
-        spin_field[sl][idx % lat.num_primitive] = l->sz;
-    }
-
-
-	
-
-    for (int sl = 0; sl < 4; sl++) {
-        fftw_execute(plans[sl]);
-        // result now available in fft_out
-		for (int h=-L/2; h <= L/2; h++){
-			for (int l=-L/2; l < L/2; l+=2){ // must jump by 2 to ensure h+l remains even
-
-				auto _i = ((h+l)/2 +L) % L;
-				auto _j = ((h+l)/2 +L) % L;
-				auto _k = (h+L) % L;
-
-				_k = (_k < L/2 +1) ? _k : L - _k;
-				
-				// to be correct we need to wrap these
-				
-				int idx = (_i*L + _j) * (L/2 + 1) + _k;
-
-                double re = fft_out[idx][0];
-                double im = fft_out[idx][1];
-
-                double Sq = (re * re + im * im) / (L * L * L);
-				
-				S_q_acc[sl][(h +L/2)* S_q_acc_dims[1] + (l +L/2)/2 ] += Sq;
-			}
-		}
-
-    }
-    n_samples++;
-}
-
-void SSF_manager::save_to_hdf5(const std::string &filename) {
-    const int n_sublattices = 4;
-
-    hid_t file_id =
-            H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+void observable_manager::write_data(hid_t file_id) {
 
     // Save lattice size
     {
-        hsize_t dims[1] = {3};
-        long size[3] = {lat.size()[0], lat.size()[1], lat.size()[2]};
-        hid_t space = H5Screate_simple(1, dims, nullptr);
-        hid_t dset = H5Dcreate2(file_id, "lattice_size", H5T_NATIVE_INT, space,
-                                                        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        H5Dwrite(dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, size);
-        H5Dclose(dset);
-        H5Sclose(space);
+      hsize_t dims[1] = {3};
+      long size[3] = {lat.size()[0], lat.size()[1], lat.size()[2]};
+      hid_t space = H5Screate_simple(1, dims, nullptr);
+      hid_t dset = H5Dcreate2(file_id, "lattice_size", H5T_NATIVE_INT, space,
+                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+      H5Dwrite(dset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, size);
+      H5Dclose(dset);
+      H5Sclose(space);
     }
 
     // Save number of samples
@@ -165,19 +87,134 @@ void SSF_manager::save_to_hdf5(const std::string &filename) {
         H5Dclose(dset);
         H5Sclose(space);
     }
+}
+
+
+// SSF storage
+
+ssf_manager::ssf_manager(const Lattice &_lat) : 
+    observable_manager(_lat) {
+    auto Lvec = lat.size();
+    assert(Lvec[0] == Lvec[1] && Lvec[1] == Lvec[2]); // otherwise it's too hard
+	auto L = Lvec[0];	
+	
+    fft_out = fftw_alloc_complex(L * L * (L / 2 + 1));
+
+	S_q_acc_dims[0] = 4; // num sublattices
+	S_q_acc_dims[1] = L+1;
+	S_q_acc_dims[2] = L/2+1;
+
+    for (int sl = 0; sl < 4; sl++) {
+        spin_field[sl] = fftw_alloc_real(lat.num_primitive);
+        plans[sl] = fftw_plan_dft_r2c_3d(L, L, L, spin_field[sl], fft_out,
+                                         FFTW_ESTIMATE);
+    }
+
+    auto N = S_q_acc_dims[0] * S_q_acc_dims[1] * S_q_acc_dims[2];
+    S_q_acc = new double[ N ];
+    for (hsize_t i=0; i< N; i++){
+        S_q_acc[i] = 0.;
+    }
+}
+
+ssf_manager::~ssf_manager() {
+    for (int sl = 0; sl < 4; sl++) {
+        fftw_destroy_plan(plans[sl]);
+        fftw_free(spin_field[sl]);
+    }
+    fftw_free(fft_out);
+
+    delete[] S_q_acc;
+}
+
+
+void ssf_manager::store_ssf() { // saves current state of the lattice to	
+    auto L = lat.size()[0];
+    for (auto [idx, l] : lat.links) {
+		// exploits the structure of lat.links' indexing system
+		// TODO this should really be provided by LIL itself, since it uses forbidden internal knowledge
+        auto sl = idx / lat.num_primitive;
+		assert( lat.primitive_spec.sl_of_link(l->position) == sl);
+		auto tmp = idx % lat.num_primitive;
+		int J[3];
+		J[0] = tmp / (L*L);
+		J[1] = (tmp - L*L*J[0]) / L;
+		J[2] = tmp - L*(L*J[0]+J[1]);
+		assert(lat.primitive_spec.lattice_vectors * ipos_t({J[2],J[1],J[0]}) + lat.primitive_spec.link_no(sl).position == l->position);
+
+
+        assert(sl < 4);
+        spin_field[sl][idx % lat.num_primitive] = l->sz;
+    }
+
+
+	
+
+    for (hsize_t sl = 0; sl < S_q_acc_dims[0]; sl++) {
+        fftw_execute(plans[sl]);
+        // result now available in fft_out
+		for (int h=-L/2; h <= L/2; h++){
+			for (int l=-L/2; l < L/2; l+=2){ // must jump by 2 to ensure h+l remains even
+
+				auto _i = ((h+l)/2 +L) % L;
+				auto _j = ((h+l)/2 +L) % L;
+				auto _k = (h+L) % L;
+
+				_k = (_k < L/2 +1) ? _k : L - _k;
+				
+				// to be correct we need to wrap these
+				
+				int idx = (_i*L + _j) * (L/2 + 1) + _k;
+
+                double re = fft_out[idx][0];
+                double im = fft_out[idx][1];
+
+                double Sq = (re * re + im * im) / (L * L * L);
+				
+				S_q_acc[sl * S_q_acc_dims[2]*S_q_acc_dims[1] 
+                    + (h +L/2)* S_q_acc_dims[1] + (l +L/2)/2 ] += Sq;
+			}
+		}
+
+    }
+}
+
+
+void ssf_manager::write_data(hid_t file_id) {
 
     // Save S(q) for each sublattice
-    for (int sl = 0; sl < n_sublattices; ++sl) {
-        std::string name = "S_q_sublattice_" + std::to_string(sl);
+    {
+        std::string name = "S_q_sublattice";
         //hsize_t dims[2] = {Lx, Nk};
-        hid_t space = H5Screate_simple(2, S_q_acc_dims, nullptr);
+        hid_t space = H5Screate_simple(3, S_q_acc_dims, nullptr);
         hid_t dset = H5Dcreate2(file_id, name.c_str(), H5T_NATIVE_DOUBLE, space,
                                                         H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         H5Dwrite(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
-                          S_q_acc[sl]);
+                          S_q_acc);
         H5Dclose(dset);
         H5Sclose(space);
     }
 
-    H5Fclose(file_id);
-}
+} 
+
+// Sz storage
+
+void Sz_manager::write_data(hid_t file_id) {
+    const auto L = lat.size();
+
+    // Save S(q) for each sublattice
+    {
+        std::string name = "Sz";
+        const hsize_t dims[3] = {static_cast<hsize_t>(L[0]),
+                                 static_cast<hsize_t>(L[1]),
+                                 static_cast<hsize_t>(L[2])};
+        hid_t space = H5Screate_simple(3, dims, nullptr);
+        hid_t dset = H5Dcreate2(file_id, name.c_str(), H5T_NATIVE_DOUBLE, space,
+                                                        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        H5Dwrite(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT,
+                          Sz_acc);
+        H5Dclose(dset);
+        H5Sclose(space);
+    }
+
+} 
