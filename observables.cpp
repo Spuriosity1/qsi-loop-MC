@@ -172,7 +172,7 @@ void ssf_manager::store_ssf() { // saves current state of the lattice to
                 double Sq = (re * re + im * im) / (L * L * L);
 				
 				S_q_acc[sl * S_q_acc_dims[2]*S_q_acc_dims[1] 
-                    + (h +L/2)* S_q_acc_dims[1] + (l +L/2)/2 ] += Sq;
+                    + (h +L/2)* S_q_acc_dims[2] + (l +L/2)/2 ] += Sq;
 			}
 		}
 
