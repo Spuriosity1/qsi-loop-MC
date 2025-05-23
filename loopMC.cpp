@@ -165,7 +165,7 @@ int main (int argc, const char *argv[]) {
         spins.push_back(s);
     }
     
-    auto stat_manager = ssf_manager(lat);
+    auto stat_manager = Sz_manager(lat);
 
     FILE* dbf = fopen("debug.txt", "w");
 
