@@ -1,6 +1,7 @@
 #pragma once
 #include "rationalmath.hpp"
 #include "struct.hpp"
+#include <cassert>
 
 ////////////////////////////////////////////////////////////////////////////////
 ///////   OBSERVABLES                   ///////////////////////////////////////
@@ -70,32 +71,33 @@ class ssf_manager : public observable_manager {
 // adds on raw <Sz> measurements
 class Sz_manager : public ssf_manager {
     double *Sz_acc;
-    void store_Sz();
-
-    protected:
-    void write_data(hid_t file_id);
-
-    public:
-    Sz_manager(const Lattice& _lat) : ssf_manager(_lat) {
-        Sz_acc = new double[lat.num_primitive * 4];
-    }
-    ~Sz_manager(){
-        ssf_manager::~ssf_manager();
-        delete[] Sz_acc;
-    }
-
-    void store(){
-        ssf_manager::store();
+    void store_Sz(){
         for (auto& [J, l] : lat.links){
             auto s = static_cast<Spin*>(l);
             Sz_acc[J] += s->sz;
         }
     }
 
+    protected:
+    void write_data(hid_t file_id);
+
+    public:
+    Sz_manager(const Lattice& _lat) : ssf_manager(_lat) {
+        // Sz_acc = new double[lat.num_primitive * 4];
+    }
+    ~Sz_manager(){
+        // delete[] Sz_acc;
+    }
+
+    void store(){
+        ssf_manager::store();
+        // store_Sz();
+    }
+
     void save_to_hdf5(const std::string &filename) {
         hid_t file_id = open_hdf5(filename);
         ssf_manager::write_data(file_id);
-        write_data(file_id);
+        // write_data(file_id);
         H5Fclose(file_id);
     }
 

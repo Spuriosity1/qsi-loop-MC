@@ -204,7 +204,7 @@ void Sz_manager::write_data(hid_t file_id) {
 
     // Save S(q) for each sublattice
     {
-        std::string name = "Sz";
+        std::string name = "Sz_data";
         const hsize_t dims[4] = {4,
             static_cast<hsize_t>(L[2]),
             static_cast<hsize_t>(L[1]),
